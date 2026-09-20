@@ -114,7 +114,7 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     autoComplete="name"
-                    placeholder="Marcos Vinícius"
+                    placeholder="Seu Nome"
                   />
                 </Field>
 
@@ -129,7 +129,7 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
                         setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
                       }
                       className="pl-8"
-                      placeholder="marcos_v"
+                      placeholder="seu_nome"
                     />
                   </div>
                 </Field>
@@ -182,8 +182,8 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
                         aria-pressed={interests.includes(i)}
                         className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition ${
                           interests.includes(i)
-                            ? 'border-accent bg-accent text-white'
-                            : 'border-accent/40 bg-accent/5 text-accent-strong hover:bg-accent/10'
+                            ? 'border-pine bg-pine text-white'
+                            : 'border-pine/40 bg-pine/5 text-pine-soft hover:bg-pine/10'
                         }`}
                       >
                         {i}
@@ -197,11 +197,11 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
                     type="checkbox"
                     checked={terms}
                     onChange={(e) => setTerms(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-line-300 accent-pine"
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-line-300 accent-accent-strong"
                   />
                   <span>
-                    Concordo com os <span className="font-semibold text-pine">Termos de Uso</span> e{' '}
-                    <span className="font-semibold text-pine">Política de Privacidade</span> do Gooday.
+                    Concordo com os <span className="font-semibold text-accent-strong">Termos de Uso</span> e{' '}
+                    <span className="font-semibold text-accent-strong">Política de Privacidade</span> do Gooday.
                   </span>
                 </label>
                 {touched && errors.terms && (

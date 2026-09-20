@@ -13,6 +13,7 @@ import { supabase, type Tables, type Views } from '../lib/supabase'
 import { clockTime, timeAgo } from '../lib/format'
 import { mapNotification } from '../lib/notifications'
 import { photo, type PhotoTheme } from '../data/images'
+import { uploadAvatar, uploadPostImage, uploadStoryImage } from '../lib/upload'
 import type {
   AppNotification,
   Comment,
@@ -255,10 +256,10 @@ interface StoreValue {
   toggleReaction: (postId: string, emoji: string) => void
   loadPostComments: (postId: string) => void
   addComment: (postId: string, text: string) => void
-  createPost: (input: { text: string; tags: string[]; theme?: Interest }) => void
+  createPost: (input: { text: string; tags: string[]; imageFile?: File }) => Promise<void>
   updatePost: (postId: string, text: string) => void
   deletePost: (postId: string) => void
-  createStory: (caption: string) => void
+  createStory: (input: { caption: string; imageFile?: File }) => Promise<void>
   toggleFollow: (userId: string) => void
   isFollowing: (userId: string) => boolean
   toggleJoinGroup: (groupId: string) => void
@@ -269,6 +270,7 @@ interface StoreValue {
   markAllNotificationsRead: () => void
   markNotificationRead: (id: string) => void
   updateProfile: (input: { name: string; bio: string; city: string }) => void
+  updateAvatar: (file: File) => Promise<void>
   updateEmail: (email: string) => void
   email: string
 
@@ -473,6 +475,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         email: input.email.trim(),
         password: input.password,
         options: {
+          emailRedirectTo: window.location.origin,
           data: {
             name: input.name.trim(),
             handle: input.handle.trim(),
@@ -632,18 +635,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const createPost = useCallback(
-    async ({ text, tags, theme }: { text: string; tags: string[]; theme?: Interest }) => {
+    async ({ text, tags, imageFile }: { text: string; tags: string[]; imageFile?: File }) => {
       if (!session) return
-      const image = photo(theme ? THEME_TO_PHOTO[theme] : 'nature', Math.floor(Math.random() * 3))
+      let image = ''
+      if (imageFile) {
+        try {
+          image = await uploadPostImage(imageFile, session.user.id)
+        } catch (err) {
+          toast(err instanceof Error ? err.message : 'Não foi possível enviar a imagem')
+          throw err
+        }
+      }
       const { data: postId, error } = await supabase.rpc('create_post', {
         p_body: text.trim(),
         p_tags: tags,
-        p_media_urls: [image],
+        p_media_urls: image ? [image] : [],
         p_audience: 'PUBLIC',
       })
       if (error || !postId) {
-        toast('Não foi possível publicar agora')
-        return
+        toast('Não foi possível publicar agora. Tente novamente.')
+        throw error ?? new Error('create_post failed')
       }
       const newPost: Post = {
         id: postId,
@@ -698,17 +709,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const createStory = useCallback(
-    async (caption: string) => {
+    async ({ caption, imageFile }: { caption: string; imageFile?: File }) => {
       if (!session) return
       const clean = caption.trim() || 'Meu dia hoje'
-      const image = photo('nature', Math.floor(Math.random() * 3), 700)
+      let image: string
+      if (imageFile) {
+        try {
+          image = await uploadStoryImage(imageFile, session.user.id)
+        } catch (err) {
+          toast(err instanceof Error ? err.message : 'Não foi possível enviar a mídia')
+          throw err
+        }
+      } else {
+        image = photo('nature', Math.floor(Math.random() * 3), 700)
+      }
       const { data: storyId, error } = await supabase.rpc('create_story', {
         p_caption: clean,
         p_media_url: image,
       })
       if (error || !storyId) {
-        toast('Não foi possível publicar o story')
-        return
+        toast('Não foi possível publicar o story. Tente novamente.')
+        throw error ?? new Error('create_story failed')
       }
       const newStory: Story = { id: storyId, authorId: session.user.id, image, caption: clean, seen: true }
       setStories((prev) => [newStory, ...prev])
@@ -997,9 +1018,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [session, toast],
   )
 
+  const updateAvatar = useCallback(
+    async (file: File) => {
+      if (!session) return
+      let url: string
+      try {
+        url = await uploadAvatar(file, session.user.id)
+      } catch (err) {
+        toast(err instanceof Error ? err.message : 'Não foi possível enviar a foto')
+        return
+      }
+      const { error } = await supabase.from('profiles').update({ avatar_url: url }).eq('id', session.user.id)
+      if (error) {
+        toast('Não foi possível salvar a foto de perfil')
+        return
+      }
+      setProfile((prev) => (prev ? { ...prev, avatar: url } : prev))
+      setUsers((prev) => prev.map((u) => (u.id === session.user.id ? { ...u, avatar: url } : u)))
+      toast('Foto de perfil atualizada')
+    },
+    [session, toast],
+  )
+
   const updateEmail = useCallback(
     async (newEmail: string) => {
-      const { error } = await supabase.auth.updateUser({ email: newEmail })
+      const { error } = await supabase.auth.updateUser(
+        { email: newEmail },
+        { emailRedirectTo: window.location.origin },
+      )
       if (error) {
         toast(mapAuthError(error.message))
         return
@@ -1092,6 +1138,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     markAllNotificationsRead,
     markNotificationRead,
     updateProfile,
+    updateAvatar,
     updateEmail,
     email,
     toasts,

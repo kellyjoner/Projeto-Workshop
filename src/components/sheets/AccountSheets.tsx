@@ -1,14 +1,17 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../../app/store'
 import { Sheet } from '../ui/Sheet'
+import { Icon } from '../ui/Icon'
 import { Avatar, Button, Field, Input, Textarea } from '../ui/primitives'
 
 export function EditProfileSheet() {
-  const { me, closeSheet, updateProfile } = useStore()
+  const { me, closeSheet, updateProfile, updateAvatar } = useStore()
   const [name, setName] = useState(me.name)
   const [bio, setBio] = useState(me.bio ?? '')
   const [city, setCity] = useState(me.city ?? '')
   const [touched, setTouched] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const invalid = name.trim().length < 2
 
@@ -17,6 +20,14 @@ export function EditProfileSheet() {
     if (invalid) return
     updateProfile({ name: name.trim(), bio: bio.trim(), city: city.trim() })
     closeSheet()
+  }
+
+  const onAvatarChosen = async (file: File | undefined) => {
+    if (!file) return
+    setAvatarBusy(true)
+    await updateAvatar(file)
+    setAvatarBusy(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   return (
@@ -36,10 +47,28 @@ export function EditProfileSheet() {
     >
       <div className="flex flex-col gap-4 pb-2">
         <div className="flex items-center gap-4">
-          <Avatar src={me.avatar} alt={me.name} size={64} ring />
+          <div className="relative shrink-0">
+            <Avatar src={me.avatar} alt={me.name} size={64} ring />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarBusy}
+              aria-label="Alterar foto de perfil"
+              className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-pine text-white shadow ring-2 ring-surface transition disabled:opacity-60"
+            >
+              <Icon name="camera" className="h-3.5 w-3.5" strokeWidth={2.2} />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onAvatarChosen(e.target.files?.[0])}
+            />
+          </div>
           <div className="text-sm text-ink-500">
             <p className="font-semibold text-ink-900">@{me.handle}</p>
-            <p>A foto vem da sua conta.</p>
+            <p>{avatarBusy ? 'Enviando foto…' : 'Toque no ícone para trocar a foto.'}</p>
           </div>
         </div>
 

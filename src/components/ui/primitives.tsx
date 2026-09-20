@@ -1,5 +1,4 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react'
-import { Img } from './Img'
+import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
 import { useStore } from '../../app/store'
 
 /* -------------------------------------------------------------------------- */
@@ -76,6 +75,14 @@ export function Textarea({ className = '', ...rest }: TextareaHTMLAttributes<HTM
 /* Avatar                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/** "Kelly" -> "K", "Braian Viacava" -> "BV". */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return '?'
+  if (words.length === 1) return words[0]!.slice(0, 1).toUpperCase()
+  return (words[0]!.slice(0, 1) + words[words.length - 1]!.slice(0, 1)).toUpperCase()
+}
+
 export function Avatar({
   src,
   alt,
@@ -91,13 +98,24 @@ export function Avatar({
   online?: boolean
   onClick?: () => void
 }) {
-  const img = (
-    <Img
+  const [broken, setBroken] = useState(false)
+
+  const img = !src || broken ? (
+    <span
+      style={{ width: size, height: size, fontSize: Math.max(11, size * 0.4) }}
+      className="flex items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-strong font-bold leading-none text-white"
+    >
+      {initials(alt)}
+    </span>
+  ) : (
+    <img
       src={src}
       alt={alt}
-      seed={alt}
+      loading="lazy"
+      decoding="async"
       style={{ width: size, height: size }}
       className="rounded-full object-cover bg-line-200"
+      onError={() => setBroken(true)}
     />
   )
 

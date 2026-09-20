@@ -14,8 +14,11 @@ export function ComposePostSheet() {
   const { closeSheet, createPost, me, go } = useStore()
   const [text, setText] = useState('')
   const [tags, setTags] = useState('')
-  const [theme, setTheme] = useState<Interest>('Corrida')
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
   const [touched, setTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const invalid = text.trim().length < 3
   const parsedTags = tags
@@ -24,12 +27,31 @@ export function ComposePostSheet() {
     .filter(Boolean)
     .slice(0, 5)
 
-  const submit = () => {
+  const onFileChosen = (file: File | undefined) => {
+    if (!file) return
+    setImageFile(file)
+    setPreview(URL.createObjectURL(file))
+  }
+
+  const removeImage = () => {
+    setImageFile(null)
+    setPreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const submit = async () => {
     setTouched(true)
-    if (invalid) return
-    createPost({ text, tags: parsedTags, theme })
-    closeSheet()
-    go('home')
+    if (invalid || busy) return
+    setBusy(true)
+    try {
+      await createPost({ text, tags: parsedTags, imageFile: imageFile ?? undefined })
+      closeSheet()
+      go('home')
+    } catch {
+      // erro já mostrado via toast — mantém a folha aberta para o usuário tentar de novo
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -40,11 +62,11 @@ export function ComposePostSheet() {
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-ink-500">{text.trim().length}/280</span>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={closeSheet}>
+            <Button variant="ghost" onClick={closeSheet} disabled={busy}>
               Cancelar
             </Button>
-            <Button onClick={submit} disabled={invalid}>
-              Publicar
+            <Button onClick={submit} disabled={invalid || busy}>
+              {busy ? 'Publicando…' : 'Publicar'}
             </Button>
           </div>
         </div>
@@ -94,22 +116,36 @@ export function ComposePostSheet() {
           </div>
         )}
 
-        <Field label="Tema da capa" hint="Define a imagem sugerida para a publicação.">
-          <div className="flex flex-wrap gap-2">
-            {INTERESTS.map((i) => (
+        <Field label="Foto" hint="Opcional. JPG, PNG, WEBP ou GIF — até 8MB.">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onFileChosen(e.target.files?.[0])}
+          />
+          {preview ? (
+            <div className="relative overflow-hidden rounded-2xl">
+              <img src={preview} alt="Prévia da foto escolhida" className="h-48 w-full object-cover" />
               <button
-                key={i}
                 type="button"
-                onClick={() => setTheme(i)}
-                aria-pressed={theme === i}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-                  theme === i ? 'bg-pine text-white' : 'bg-line-100 text-ink-700 hover:bg-line-200'
-                }`}
+                onClick={removeImage}
+                className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5 text-white backdrop-blur"
+                aria-label="Remover foto"
               >
-                {i}
+                <Icon name="close" className="h-4 w-4" strokeWidth={2.4} />
               </button>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex h-32 w-full flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-line-300 text-ink-500 transition hover:border-pine hover:text-pine"
+            >
+              <Icon name="photo" className="h-6 w-6" />
+              <span className="text-xs font-semibold">Adicionar foto</span>
+            </button>
+          )}
         </Field>
       </div>
     </Sheet>
@@ -130,10 +166,14 @@ const FORMAT_COPY: Record<StoryFormat, { title: string; placeholder: string }> =
 export function ComposeStorySheet() {
   const { closeSheet, createStory, go, storyFormat, setStoryFormat } = useStore()
   const [caption, setCaption] = useState('')
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
+  const [touched, setTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const needsMediaPicker = storyFormat === 'camera' || storyFormat === 'galeria'
   const copy = FORMAT_COPY[storyFormat ?? 'texto']
+  const invalid = needsMediaPicker && !imageFile
 
   // Open the device's camera/gallery picker right away for those two formats.
   useEffect(() => {
@@ -143,6 +183,7 @@ export function ComposeStorySheet() {
 
   const onFileChosen = (file: File | undefined) => {
     if (!file) return
+    setImageFile(file)
     setPreview(URL.createObjectURL(file))
   }
 
@@ -151,10 +192,19 @@ export function ComposeStorySheet() {
     closeSheet()
   }
 
-  const submit = () => {
-    createStory(caption)
-    close()
-    go('home')
+  const submit = async () => {
+    setTouched(true)
+    if (invalid || busy) return
+    setBusy(true)
+    try {
+      await createStory({ caption, imageFile: imageFile ?? undefined })
+      close()
+      go('home')
+    } catch {
+      // erro já mostrado via toast — mantém a folha aberta para o usuário tentar de novo
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -163,11 +213,11 @@ export function ComposeStorySheet() {
       onClose={close}
       footer={
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={close}>
+          <Button variant="ghost" onClick={close} disabled={busy}>
             Cancelar
           </Button>
-          <Button variant="accent" onClick={submit}>
-            Publicar story
+          <Button variant="accent" onClick={submit} disabled={invalid || busy}>
+            {busy ? 'Publicando…' : 'Publicar story'}
           </Button>
         </div>
       }
@@ -182,7 +232,7 @@ export function ComposeStorySheet() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,video/*"
+              accept="image/*"
               capture={storyFormat === 'camera' ? 'environment' : undefined}
               className="hidden"
               onChange={(e) => onFileChosen(e.target.files?.[0])}
@@ -210,11 +260,8 @@ export function ComposeStorySheet() {
                 </span>
               </button>
             )}
-            {preview && (
-              <p className="text-xs text-ink-500">
-                Prévia local — o envio de mídia própria ainda não está disponível, então publicamos com uma
-                foto de exemplo por enquanto.
-              </p>
+            {touched && invalid && (
+              <p className="text-xs font-medium text-danger">Escolha uma foto para publicar o story.</p>
             )}
           </div>
         )}

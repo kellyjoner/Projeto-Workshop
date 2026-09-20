@@ -1,0 +1,154 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Gooday design tokens — derived from soft_tech_social/DESIGN.md
+   Single source of truth. Do not scatter raw values across components.
+--------------------------------------------------------------------------- */
+@theme {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* Canvas & surfaces */
+  --color-app-bg: #ecedf5;
+  --color-surface: #ffffff;
+
+  /* Brand */
+  --color-accent: #fe63ac;
+  --color-accent-strong: #af216d;
+  --color-pine: #004e44;
+  --color-pine-soft: #28685e;
+  --color-lime: #4bb12b;
+  --color-lime-soft: #eaf7e4;
+
+  /* Neutrals */
+  --color-ink-900: #111111;
+  --color-ink-700: #444444;
+  --color-ink-500: #777777;
+  --color-line-300: #d9dae2;
+  --color-line-200: #e8e9ef;
+  --color-line-100: #f5f5f8;
+
+  /* Feedback */
+  --color-success: #2e8b67;
+  --color-warning: #d99a2b;
+  --color-danger: #d94a4a;
+
+  /* Radii */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+
+  /* Breakpoint used to switch from mobile shell to desktop shell */
+  --breakpoint-app: 800px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--color-app-bg);
+    color: var(--color-ink-900);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The app owns scrolling; never let the page scroll horizontally. */
+  body {
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-pine);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Safe areas for notched phones — the exports assumed a fixed desktop frame. */
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .card {
+    background-color: var(--color-surface);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 1px 2px rgb(17 17 17 / 0.04),
+      0 1px 3px rgb(17 17 17 / 0.03);
+  }
+
+  .fade-y {
+    mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+  }
+}
+
+@keyframes gd-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes gd-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes gd-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.anim-fade {
+  animation: gd-fade-in 200ms ease-out both;
+}
+.anim-zoom {
+  animation: gd-zoom-in 200ms ease-out both;
+}
+.anim-slide-up {
+  animation: gd-slide-up 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade,
+  .anim-zoom,
+  .anim-slide-up {
+    animation: none;
+  }
+}

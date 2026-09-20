@@ -1,0 +1,264 @@
+import { useState } from 'react'
+import { useStore } from '../../app/store'
+import { INTERESTS, type Interest } from '../../data/types'
+import { Sheet } from '../ui/Sheet'
+import { Button, Field, Input, Textarea } from '../ui/primitives'
+import { Avatar } from '../ui/primitives'
+
+/* -------------------------------------------------------------------------- */
+/* Publicação                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export function ComposePostSheet() {
+  const { closeSheet, createPost, me, go } = useStore()
+  const [text, setText] = useState('')
+  const [tags, setTags] = useState('')
+  const [theme, setTheme] = useState<Interest>('Corrida')
+  const [touched, setTouched] = useState(false)
+
+  const invalid = text.trim().length < 3
+  const parsedTags = tags
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/^#/, '').trim())
+    .filter(Boolean)
+    .slice(0, 5)
+
+  const submit = () => {
+    setTouched(true)
+    if (invalid) return
+    createPost({ text, tags: parsedTags, theme })
+    closeSheet()
+    go('home')
+  }
+
+  return (
+    <Sheet
+      title="Nova publicação"
+      onClose={closeSheet}
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-ink-500">{text.trim().length}/280</span>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={closeSheet}>
+              Cancelar
+            </Button>
+            <Button onClick={submit} disabled={invalid}>
+              Publicar
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 pb-2">
+        <div className="flex items-center gap-3">
+          <Avatar src={me.avatar} alt={me.name} size={42} ring />
+          <div>
+            <p className="text-sm font-bold text-ink-900">{me.name}</p>
+            <p className="text-xs text-ink-500">@{me.handle}</p>
+          </div>
+        </div>
+
+        <Field
+          label="O que você fez de bom hoje?"
+          error={touched && invalid ? 'Escreva pelo menos 3 caracteres.' : undefined}
+        >
+          <Textarea
+            autoFocus
+            rows={5}
+            maxLength={280}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Corrida leve de 5km antes do trabalho…"
+          />
+        </Field>
+
+        <Field label="Hashtags" hint="Separe por espaço. Até 5.">
+          <Input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="corrida rotina"
+          />
+        </Field>
+
+        {parsedTags.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {parsedTags.map((t) => (
+              <span
+                key={t}
+                className="rounded-full border border-accent/50 bg-accent/5 px-3 py-1 text-xs font-semibold text-accent-strong"
+              >
+                #{t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <Field label="Tema da capa" hint="Define a imagem sugerida para a publicação.">
+          <div className="flex flex-wrap gap-2">
+            {INTERESTS.map((i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setTheme(i)}
+                aria-pressed={theme === i}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  theme === i ? 'bg-pine text-white' : 'bg-line-100 text-ink-700 hover:bg-line-200'
+                }`}
+              >
+                {i}
+              </button>
+            ))}
+          </div>
+        </Field>
+      </div>
+    </Sheet>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Story                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export function ComposeStorySheet() {
+  const { closeSheet, createStory, go } = useStore()
+  const [caption, setCaption] = useState('')
+
+  const submit = () => {
+    createStory(caption)
+    closeSheet()
+    go('home')
+  }
+
+  return (
+    <Sheet
+      title="Novo story"
+      onClose={closeSheet}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={closeSheet}>
+            Cancelar
+          </Button>
+          <Button variant="accent" onClick={submit}>
+            Publicar story
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 pb-2">
+        <p className="rounded-2xl bg-lime-soft px-4 py-3 text-sm text-ink-700">
+          Stories somem em 24 horas. Conte rapidinho como foi o seu dia.
+        </p>
+        <Field label="Legenda" hint="Opcional.">
+          <Input
+            autoFocus
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            maxLength={80}
+            placeholder="Treino fechado antes das 7h ☀️"
+          />
+        </Field>
+      </div>
+    </Sheet>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Criar grupo                                                                */
+/* -------------------------------------------------------------------------- */
+
+export function CreateGroupSheet() {
+  const { closeSheet, createGroup, go } = useStore()
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState<Interest>('Corrida')
+  const [privacy, setPrivacy] = useState<'Público' | 'Privado'>('Público')
+  const [touched, setTouched] = useState(false)
+
+  const invalid = name.trim().length < 3
+
+  const submit = () => {
+    setTouched(true)
+    if (invalid) return
+    createGroup({ name, description, category, privacy })
+    closeSheet()
+    go('grupos')
+  }
+
+  return (
+    <Sheet
+      title="Criar grupo"
+      onClose={closeSheet}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={closeSheet}>
+            Cancelar
+          </Button>
+          <Button onClick={submit} disabled={invalid}>
+            Criar grupo
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 pb-2">
+        <Field
+          label="Nome do grupo"
+          error={touched && invalid ? 'Use pelo menos 3 caracteres.' : undefined}
+        >
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Corrida no Ibirapuera"
+          />
+        </Field>
+
+        <Field label="Descrição" hint="Explique em uma frase para quem é o grupo.">
+          <Textarea
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Encontros de sábado às 7h, no seu ritmo."
+          />
+        </Field>
+
+        <Field label="Categoria">
+          <div className="flex flex-wrap gap-2">
+            {INTERESTS.map((i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setCategory(i)}
+                aria-pressed={category === i}
+                className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  category === i ? 'bg-pine text-white' : 'bg-line-100 text-ink-700 hover:bg-line-200'
+                }`}
+              >
+                {i}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="Privacidade">
+          <div className="flex gap-2">
+            {(['Público', 'Privado'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPrivacy(p)}
+                aria-pressed={privacy === p}
+                className={`flex-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                  privacy === p
+                    ? 'border-pine bg-pine/5 text-pine'
+                    : 'border-line-200 text-ink-700 hover:bg-line-100'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </Field>
+      </div>
+    </Sheet>
+  )
+}

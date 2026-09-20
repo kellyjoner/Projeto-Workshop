@@ -1,17 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../../app/store'
 import type { Post } from '../../data/types'
 import { Icon } from '../ui/Icon'
 import { Img } from '../ui/Img'
-import { Avatar, Tag } from '../ui/primitives'
+import { Avatar, Button, Tag, Textarea } from '../ui/primitives'
 
 const QUICK_REACTIONS = ['💪', '🌱', '🔥', '🧘', '👏']
 
 export function PostCard({ post, expanded = false }: { post: Post; expanded?: boolean }) {
-  const { userOf, go, toggleLike, toggleSave, toggleReaction, addComment, loadPostComments, toast } = useStore()
+  const {
+    me,
+    userOf,
+    go,
+    toggleLike,
+    toggleSave,
+    toggleReaction,
+    addComment,
+    loadPostComments,
+    toggleFollow,
+    isFollowing,
+    updatePost,
+    deletePost,
+    toast,
+  } = useStore()
   const author = userOf(post.authorId)
+  const isOwner = post.authorId === me.id
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState(post.text)
   const [draft, setDraft] = useState('')
+  const optionsRef = useRef<HTMLDivElement>(null)
 
   // Comments load lazily — only once the card is expanded (post detail view).
   useEffect(() => {
@@ -19,16 +38,53 @@ export function PostCard({ post, expanded = false }: { post: Post; expanded?: bo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, post.id])
 
+  // Close the options menu on any outside click.
+  useEffect(() => {
+    if (!optionsOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!optionsRef.current?.contains(e.target as Node)) setOptionsOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [optionsOpen])
+
+  const copyLink = async () => {
+    const url = `${window.location.origin}/#post-${post.id}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast('Link copiado')
+    } catch {
+      toast('Não foi possível copiar o link')
+    }
+  }
+
   const share = async () => {
     const url = `${window.location.origin}/#post-${post.id}`
     try {
       if (navigator.share) await navigator.share({ title: 'Gooday', text: post.text, url })
-      else {
-        await navigator.clipboard.writeText(url)
-        toast('Link copiado')
-      }
+      else await copyLink()
     } catch {
-      toast('Link copiado')
+      // o usuário cancelou o share nativo — nada a fazer
+    }
+  }
+
+  const startEdit = () => {
+    setEditDraft(post.text)
+    setEditing(true)
+    setOptionsOpen(false)
+  }
+
+  const saveEdit = () => {
+    if (!editDraft.trim()) return
+    updatePost(post.id, editDraft)
+    setEditing(false)
+  }
+
+  const confirmDelete = () => {
+    setOptionsOpen(false)
+    if (window.confirm('Excluir esta publicação? Essa ação não pode ser desfeita.')) {
+      deletePost(post.id)
+      if (expanded) go('home')
     }
   }
 
@@ -51,17 +107,98 @@ export function PostCard({ post, expanded = false }: { post: Post; expanded?: bo
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          aria-label="Mais opções"
-          onClick={() => toast('Opções do post em breve')}
-          className="shrink-0 rounded-full p-1.5 text-ink-500 transition hover:bg-line-100 hover:text-ink-900"
-        >
-          <Icon name="dots" className="h-5 w-5" strokeWidth={2.6} />
-        </button>
+        <div ref={optionsRef} className="relative shrink-0">
+          <button
+            type="button"
+            aria-label="Mais opções"
+            aria-expanded={optionsOpen}
+            onClick={() => setOptionsOpen((v) => !v)}
+            className="rounded-full p-1.5 text-ink-500 transition hover:bg-line-100 hover:text-ink-900"
+          >
+            <Icon name="dots" className="h-5 w-5" strokeWidth={2.6} />
+          </button>
+
+          {optionsOpen && (
+            <div
+              role="menu"
+              className="anim-zoom absolute right-0 top-10 z-20 w-64 overflow-hidden rounded-2xl bg-surface p-2 shadow-lg ring-1 ring-line-200"
+            >
+              {isOwner ? (
+                <>
+                  <MenuItem icon="edit" label="Editar publicação" onClick={startEdit} />
+                  <MenuItem icon="trash" label="Excluir publicação" tone="danger" onClick={confirmDelete} />
+                </>
+              ) : (
+                <>
+                  <MenuItem
+                    icon="bookmark"
+                    label={post.saved ? 'Remover dos salvos' : 'Salvar publicação'}
+                    onClick={() => {
+                      toggleSave(post.id)
+                      setOptionsOpen(false)
+                    }}
+                  />
+                  <MenuItem
+                    icon="userPlus"
+                    label={isFollowing(author.id) ? `Deixar de seguir @${author.handle}` : `Seguir @${author.handle}`}
+                    onClick={() => {
+                      toggleFollow(author.id)
+                      setOptionsOpen(false)
+                    }}
+                  />
+                  <MenuItem
+                    icon="volumeOff"
+                    label={`Silenciar @${author.handle}`}
+                    onClick={() => {
+                      toast('Silenciar autores ainda não está disponível')
+                      setOptionsOpen(false)
+                    }}
+                  />
+                  <MenuItem
+                    icon="link"
+                    label="Copiar link da publicação"
+                    onClick={() => {
+                      copyLink()
+                      setOptionsOpen(false)
+                    }}
+                  />
+                  <MenuItem
+                    icon="alertTriangle"
+                    label="Denunciar publicação"
+                    tone="danger"
+                    onClick={() => {
+                      toast('Publicação denunciada. Nossa equipe vai revisar.')
+                      setOptionsOpen(false)
+                    }}
+                  />
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
-      <p className="mb-3 text-sm leading-relaxed text-ink-900">{post.text}</p>
+      {editing ? (
+        <div className="mb-3 flex flex-col gap-2">
+          <Textarea
+            autoFocus
+            rows={4}
+            maxLength={2000}
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setEditing(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={saveEdit} disabled={!editDraft.trim()}>
+              Salvar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="mb-3 text-sm leading-relaxed text-ink-900">{post.text}</p>
+      )}
 
       {post.tags.length > 0 && (
         <div className="mb-3.5 flex flex-wrap items-center gap-2">
@@ -233,5 +370,31 @@ export function PostCard({ post, expanded = false }: { post: Post; expanded?: bo
         </section>
       )}
     </article>
+  )
+}
+
+function MenuItem({
+  icon,
+  label,
+  tone = 'default',
+  onClick,
+}: {
+  icon: Parameters<typeof Icon>[0]['name']
+  label: string
+  tone?: 'default' | 'danger'
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition hover:bg-line-100 ${
+        tone === 'danger' ? 'text-danger' : 'text-ink-900'
+      }`}
+    >
+      <Icon name={icon} className="h-[18px] w-[18px] shrink-0" strokeWidth={1.9} />
+      <span className="truncate">{label}</span>
+    </button>
   )
 }

@@ -49,6 +49,7 @@ export interface View {
 
 export type SheetName =
   | 'criar'
+  | 'story-format'
   | 'compose-post'
   | 'compose-story'
   | 'notificacoes'
@@ -56,6 +57,9 @@ export type SheetName =
   | 'alterar-email'
   | 'alterar-senha'
   | 'criar-grupo'
+
+/** Which of the 4 story formats the user picked before composing. */
+export type StoryFormat = 'camera' | 'galeria' | 'texto' | 'checkin'
 
 export interface Sheet {
   name: SheetName
@@ -225,6 +229,9 @@ interface StoreValue {
   storyIndex: number | null
   openStory: (index: number) => void
   closeStory: () => void
+  /** Format picked in the "Story" sheet, read by the composer to tailor its copy. */
+  storyFormat: StoryFormat | null
+  setStoryFormat: (format: StoryFormat | null) => void
 
   /* data */
   me: User
@@ -249,6 +256,8 @@ interface StoreValue {
   loadPostComments: (postId: string) => void
   addComment: (postId: string, text: string) => void
   createPost: (input: { text: string; tags: string[]; theme?: Interest }) => void
+  updatePost: (postId: string, text: string) => void
+  deletePost: (postId: string) => void
   createStory: (caption: string) => void
   toggleFollow: (userId: string) => void
   isFollowing: (userId: string) => boolean
@@ -303,6 +312,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* overlays -------------------------------------------------------------- */
   const [sheet, setSheet] = useState<Sheet | null>(null)
   const [storyIndex, setStoryIndex] = useState<number | null>(null)
+  const [storyFormat, setStoryFormat] = useState<StoryFormat | null>(null)
 
   const openSheet = useCallback((name: SheetName) => setSheet({ name }), [])
   const closeSheet = useCallback(() => setSheet(null), [])
@@ -653,6 +663,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toast('Publicação criada')
     },
     [session, toast],
+  )
+
+  const updatePost = useCallback(
+    async (postId: string, text: string) => {
+      const clean = text.trim()
+      const before = posts.find((p) => p.id === postId)
+      if (!clean || !before) return
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, text: clean } : p)))
+      const { error } = await supabase.from('posts').update({ body: clean }).eq('id', postId)
+      if (error) {
+        setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, text: before.text } : p)))
+        toast('Não foi possível editar a publicação')
+        return
+      }
+      toast('Publicação atualizada')
+    },
+    [posts, toast],
+  )
+
+  const deletePost = useCallback(
+    async (postId: string) => {
+      const before = posts
+      setPosts((prev) => prev.filter((p) => p.id !== postId))
+      const { error } = await supabase.from('posts').delete().eq('id', postId)
+      if (error) {
+        setPosts(before)
+        toast('Não foi possível excluir a publicação')
+        return
+      }
+      toast('Publicação excluída')
+    },
+    [posts, toast],
   )
 
   const createStory = useCallback(
@@ -1017,6 +1059,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     storyIndex,
     openStory,
     closeStory,
+    storyFormat,
+    setStoryFormat,
     me,
     users,
     posts,
@@ -1035,6 +1079,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     loadPostComments,
     addComment,
     createPost,
+    updatePost,
+    deletePost,
     createStory,
     toggleFollow,
     isFollowing,

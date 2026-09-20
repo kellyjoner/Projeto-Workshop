@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { useStore } from '../../app/store'
+import { useEffect, useRef, useState } from 'react'
+import { useStore, type StoryFormat } from '../../app/store'
 import { INTERESTS, type Interest } from '../../data/types'
 import { Sheet } from '../ui/Sheet'
+import { Icon } from '../ui/Icon'
 import { Button, Field, Input, Textarea } from '../ui/primitives'
 import { Avatar } from '../ui/primitives'
 
@@ -119,23 +120,50 @@ export function ComposePostSheet() {
 /* Story                                                                      */
 /* -------------------------------------------------------------------------- */
 
+const FORMAT_COPY: Record<StoryFormat, { title: string; placeholder: string }> = {
+  camera: { title: 'Novo story · Câmera', placeholder: 'Legenda para a foto de agora…' },
+  galeria: { title: 'Novo story · Galeria', placeholder: 'Legenda para essa mídia…' },
+  texto: { title: 'Novo story · Texto & Humor', placeholder: 'Solta o verbo — pensamento, frase ou reflexão do dia' },
+  checkin: { title: 'Novo story · Check-in de Treino', placeholder: '5km, 28min, 2L de água…' },
+}
+
 export function ComposeStorySheet() {
-  const { closeSheet, createStory, go } = useStore()
+  const { closeSheet, createStory, go, storyFormat, setStoryFormat } = useStore()
   const [caption, setCaption] = useState('')
+  const [preview, setPreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const needsMediaPicker = storyFormat === 'camera' || storyFormat === 'galeria'
+  const copy = FORMAT_COPY[storyFormat ?? 'texto']
+
+  // Open the device's camera/gallery picker right away for those two formats.
+  useEffect(() => {
+    if (needsMediaPicker) fileInputRef.current?.click()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const onFileChosen = (file: File | undefined) => {
+    if (!file) return
+    setPreview(URL.createObjectURL(file))
+  }
+
+  const close = () => {
+    setStoryFormat(null)
+    closeSheet()
+  }
 
   const submit = () => {
     createStory(caption)
-    closeSheet()
+    close()
     go('home')
   }
 
   return (
     <Sheet
-      title="Novo story"
-      onClose={closeSheet}
+      title={copy.title}
+      onClose={close}
       footer={
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={closeSheet}>
+          <Button variant="ghost" onClick={close}>
             Cancelar
           </Button>
           <Button variant="accent" onClick={submit}>
@@ -148,13 +176,56 @@ export function ComposeStorySheet() {
         <p className="rounded-2xl bg-lime-soft px-4 py-3 text-sm text-ink-700">
           Stories somem em 24 horas. Conte rapidinho como foi o seu dia.
         </p>
+
+        {needsMediaPicker && (
+          <div className="flex flex-col gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*"
+              capture={storyFormat === 'camera' ? 'environment' : undefined}
+              className="hidden"
+              onChange={(e) => onFileChosen(e.target.files?.[0])}
+            />
+            {preview ? (
+              <div className="relative overflow-hidden rounded-2xl">
+                <img src={preview} alt="Prévia da mídia escolhida" className="h-48 w-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute bottom-2 right-2 rounded-full bg-black/60 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur"
+                >
+                  Trocar
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex h-32 flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-line-300 text-ink-500 transition hover:border-pine hover:text-pine"
+              >
+                <Icon name={storyFormat === 'camera' ? 'camera' : 'photo'} className="h-6 w-6" />
+                <span className="text-xs font-semibold">
+                  {storyFormat === 'camera' ? 'Abrir câmera' : 'Escolher da galeria'}
+                </span>
+              </button>
+            )}
+            {preview && (
+              <p className="text-xs text-ink-500">
+                Prévia local — o envio de mídia própria ainda não está disponível, então publicamos com uma
+                foto de exemplo por enquanto.
+              </p>
+            )}
+          </div>
+        )}
+
         <Field label="Legenda" hint="Opcional.">
           <Input
-            autoFocus
+            autoFocus={!needsMediaPicker}
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
             maxLength={80}
-            placeholder="Treino fechado antes das 7h ☀️"
+            placeholder={copy.placeholder}
           />
         </Field>
       </div>

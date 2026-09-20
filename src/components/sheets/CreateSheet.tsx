@@ -10,7 +10,7 @@ const OPTIONS: { target: SheetName; icon: IconName; title: string; description: 
     description: 'Compartilhe fotos ou texto no feed',
   },
   {
-    target: 'compose-story',
+    target: 'story-format',
     icon: 'plus',
     title: 'Story',
     description: 'Desaparece em 24 horas',

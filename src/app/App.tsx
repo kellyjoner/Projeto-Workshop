@@ -16,6 +16,7 @@ import { NotificacoesScreen } from '../components/screens/NotificacoesScreen'
 import { AuthScreen } from '../components/screens/AuthScreen'
 
 import { CreateSheet } from '../components/sheets/CreateSheet'
+import { StoryFormatSheet } from '../components/sheets/StoryFormatSheet'
 import { ComposePostSheet, ComposeStorySheet, CreateGroupSheet } from '../components/sheets/ComposeSheets'
 import { ChangeEmailSheet, ChangePasswordSheet, EditProfileSheet } from '../components/sheets/AccountSheets'
 import { StoryViewer } from '../components/sheets/StoryViewer'
@@ -58,6 +59,7 @@ function Overlays() {
   return (
     <>
       {sheet?.name === 'criar' && <CreateSheet />}
+      {sheet?.name === 'story-format' && <StoryFormatSheet />}
       {sheet?.name === 'compose-post' && <ComposePostSheet />}
       {sheet?.name === 'compose-story' && <ComposeStorySheet />}
       {sheet?.name === 'criar-grupo' && <CreateGroupSheet />}

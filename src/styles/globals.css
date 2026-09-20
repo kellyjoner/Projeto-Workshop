@@ -8,16 +8,17 @@
   --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
 
   /* Canvas & surfaces */
-  --color-app-bg: #ecedf5;
+  --color-app-bg: #f8efff;
   --color-surface: #ffffff;
 
-  /* Brand */
-  --color-accent: #fe63ac;
-  --color-accent-strong: #af216d;
-  --color-pine: #004e44;
-  --color-pine-soft: #28685e;
-  --color-lime: #4bb12b;
-  --color-lime-soft: #eaf7e4;
+  /* Brand — pine/accent/lime are legacy names; values now follow the
+     orange/magenta/purple palette (see PR that introduced this palette). */
+  --color-accent: #f0309a;
+  --color-accent-strong: #62318d;
+  --color-pine: #f77d24;
+  --color-pine-soft: #d9691a;
+  --color-lime: #62318d;
+  --color-lime-soft: #eee3f8;
 
   /* Neutrals */
   --color-ink-900: #111111;

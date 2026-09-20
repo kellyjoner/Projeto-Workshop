@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../app/store'
 import { INTERESTS, type Interest } from '../../data/types'
-import { photo } from '../../data/images'
 import { Img } from '../ui/Img'
 import { Button, Field, Input } from '../ui/primitives'
 
@@ -60,8 +59,8 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
       {/* Hero */}
       <div className="relative flex min-h-[220px] flex-1 items-end overflow-hidden lg:min-h-dvh">
         <Img
-          src={photo('run', 1, 1400)}
-          alt="Pessoa correndo ao amanhecer"
+          src="/images/auth-hero.webp"
+          alt="Tênis, squeeze e fones ao lado de um celular mostrando 75% de progresso do treino"
           seed="auth-hero"
           className="absolute inset-0 h-full w-full bg-pine object-cover"
         />
@@ -198,7 +197,7 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
                     type="checkbox"
                     checked={terms}
                     onChange={(e) => setTerms(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-line-300 accent-[#004E44]"
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-line-300 accent-pine"
                   />
                   <span>
                     Concordo com os <span className="font-semibold text-pine">Termos de Uso</span> e{' '}

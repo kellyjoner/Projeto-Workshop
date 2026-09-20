@@ -114,21 +114,24 @@ export function ChangeEmailSheet() {
 }
 
 export function ChangePasswordSheet() {
-  const { closeSheet, toast } = useStore()
+  const { closeSheet, updatePassword } = useStore()
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
   const [touched, setTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   const tooShort = next.length < 8
   const mismatch = next !== confirm
   const invalid = current.length === 0 || tooShort || mismatch
 
-  const submit = () => {
+  const submit = async () => {
     setTouched(true)
-    if (invalid) return
-    toast('Senha atualizada')
-    closeSheet()
+    if (invalid || busy) return
+    setBusy(true)
+    const ok = await updatePassword(current, next)
+    setBusy(false)
+    if (ok) closeSheet()
   }
 
   return (
@@ -140,8 +143,8 @@ export function ChangePasswordSheet() {
           <Button variant="ghost" onClick={closeSheet}>
             Cancelar
           </Button>
-          <Button onClick={submit} disabled={invalid}>
-            Salvar
+          <Button onClick={submit} disabled={invalid || busy}>
+            {busy ? 'Salvando…' : 'Salvar'}
           </Button>
         </div>
       }

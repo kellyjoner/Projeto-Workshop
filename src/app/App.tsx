@@ -70,8 +70,22 @@ function Overlays() {
   )
 }
 
+function SplashScreen() {
+  return (
+    <div className="flex min-h-dvh w-full items-center justify-center bg-app-bg">
+      <span className="anim-fade flex h-14 w-14 items-center justify-center rounded-2xl bg-pine text-2xl font-extrabold text-white">
+        g
+      </span>
+    </div>
+  )
+}
+
 export function App() {
-  const { signedIn, auth, view } = useStore()
+  const { signedIn, auth, view, loading } = useStore()
+
+  if (loading) {
+    return <SplashScreen />
+  }
 
   if (!signedIn || auth) {
     return (

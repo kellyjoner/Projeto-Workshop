@@ -59,14 +59,14 @@ export function GroupCard({ group, compact = false }: { group: Group; compact?: 
         <button
           type="button"
           onClick={() => toggleJoinGroup(group.id)}
-          aria-pressed={group.joined}
+          aria-pressed={group.joined || group.pending}
           className={`mt-3 w-full rounded-full px-3 py-2 text-xs font-semibold transition active:scale-[.98] ${
-            group.joined
+            group.joined || group.pending
               ? 'border border-line-300 bg-surface text-ink-700 hover:bg-line-100'
               : 'bg-pine text-white hover:bg-pine-soft'
           }`}
         >
-          {group.joined ? 'Participando' : 'Participar'}
+          {group.joined ? 'Participando' : group.pending ? 'Solicitado' : 'Participar'}
         </button>
       )}
     </div>

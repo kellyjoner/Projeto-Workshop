@@ -8,24 +8,22 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import {
-  CONVERSATIONS,
-  GROUPS,
-  ME_ID,
-  NOTIFICATIONS,
-  POSTS,
-  STORIES,
-  USERS,
-  usersById,
-  type AppNotification,
-  type Conversation,
-  type Group,
-  type Interest,
-  type Post,
-  type Story,
-  type User,
+import type { Session } from '@supabase/supabase-js'
+import { supabase, type Tables, type Views } from '../lib/supabase'
+import { clockTime, timeAgo } from '../lib/format'
+import { mapNotification } from '../lib/notifications'
+import { photo, type PhotoTheme } from '../data/images'
+import type {
+  AppNotification,
+  Comment,
+  Conversation,
+  Group,
+  Interest,
+  Message,
+  Post,
+  Story,
+  User,
 } from '../data/types'
-import { photo } from '../data/images'
 
 /* -------------------------------------------------------------------------- */
 /* Navigation model                                                           */
@@ -74,6 +72,124 @@ export const PRIMARY_NAV: { view: ViewName; label: string }[] = [
   { view: 'perfil', label: 'Perfil' },
 ]
 
+const THEME_TO_PHOTO: Record<Interest, PhotoTheme> = {
+  Corrida: 'run',
+  Ciclismo: 'bike',
+  Nutrição: 'food',
+  Treino: 'gym',
+  Yoga: 'yoga',
+}
+
+const EMPTY_USER: User = {
+  id: '',
+  name: '',
+  handle: '',
+  avatar: '',
+  interests: [],
+  followers: 0,
+  following: 0,
+}
+
+/* -------------------------------------------------------------------------- */
+/* Row -> UI mappers                                                          */
+/* -------------------------------------------------------------------------- */
+
+type ProfileRow = Views<'profiles_with_interests'>
+type PostRow = Views<'feed_posts'>
+type StoryRow = Views<'active_stories'>
+type GroupRow = Views<'groups_with_membership'>
+type ConversationRow = Views<'my_conversations'>
+type CommentRow = Pick<Tables<'comments'>, 'id' | 'author_id' | 'body' | 'created_at'>
+
+function mapUser(row: ProfileRow): User {
+  return {
+    id: row.id!,
+    name: row.name!,
+    handle: row.handle!,
+    avatar: row.avatar_url ?? '',
+    bio: row.bio ?? undefined,
+    city: row.location ?? undefined,
+    verified: row.is_verified ?? false,
+    interests: (row.interests ?? []) as Interest[],
+    followers: row.followers_count ?? 0,
+    following: row.following_count ?? 0,
+    // No presence system yet (see DATABASE.md follow-ups) — never fabricate this.
+    online: false,
+  }
+}
+
+function mapPost(row: PostRow): Post {
+  const reactions = (row.reactions ?? []) as { emoji: string; count: number; mine: boolean }[]
+  return {
+    id: row.id!,
+    authorId: row.author_id!,
+    text: row.body!,
+    tags: (row.tags ?? []) as string[],
+    image: (row.media_urls as string[] | null)?.[0],
+    createdAt: timeAgo(row.created_at!),
+    likes: row.likes_count ?? 0,
+    liked: row.viewer_has_liked ?? false,
+    saved: row.viewer_has_saved ?? false,
+    commentsCount: row.comments_count ?? 0,
+    reactions,
+    comments: [],
+  }
+}
+
+function mapStory(row: StoryRow): Story {
+  return {
+    id: row.id!,
+    authorId: row.author_id!,
+    image: row.image_url ?? '',
+    caption: row.caption ?? '',
+    seen: row.viewer_has_seen ?? false,
+  }
+}
+
+function mapGroup(row: GroupRow): Group {
+  const interests = (row.interests ?? []) as Interest[]
+  return {
+    id: row.id!,
+    name: row.name!,
+    cover: row.cover_url ?? '',
+    members: row.members_count ?? 0,
+    topics: row.posts_count ?? 0,
+    privacy: row.privacy === 'PRIVATE' ? 'Privado' : 'Público',
+    joined: row.viewer_status === 'ACTIVE',
+    pending: row.viewer_status === 'PENDING',
+    category: interests[0] ?? 'Corrida',
+    description: row.description ?? '',
+  }
+}
+
+function mapConversation(row: ConversationRow): Conversation {
+  return {
+    id: row.id!,
+    userId: row.other_user_id ?? '',
+    preview: row.preview ? (row.preview_is_mine ? `Você: ${row.preview}` : row.preview) : 'Diga oi 👋',
+    time: row.preview_at ? clockTime(row.preview_at) : '',
+    unread: row.unread_count ?? 0,
+    messages: [],
+  }
+}
+
+function mapComment(row: CommentRow): Comment {
+  return { id: row.id, authorId: row.author_id, text: row.body, createdAt: timeAgo(row.created_at) }
+}
+
+/** Translates common GoTrue error strings into the product's Portuguese voice. */
+function mapAuthError(message: string): string {
+  const m = message.toLowerCase()
+  if (m.includes('invalid login credentials')) return 'E-mail ou senha incorretos.'
+  if (m.includes('already registered') || m.includes('already exists')) return 'Já existe uma conta com este e-mail.'
+  if (m.includes('email not confirmed')) return 'Confirme seu e-mail antes de entrar.'
+  if (m.includes('password') && (m.includes('at least') || m.includes('6 characters')))
+    return 'A senha precisa ter pelo menos 8 caracteres.'
+  if (m.includes('rate limit')) return 'Muitas tentativas. Aguarde um instante e tente de novo.'
+  if (m.includes('invalid email')) return 'E-mail inválido.'
+  return 'Não foi possível concluir. Tente novamente.'
+}
+
 /* -------------------------------------------------------------------------- */
 /* Store shape                                                                */
 /* -------------------------------------------------------------------------- */
@@ -87,9 +203,14 @@ interface StoreValue {
   /* auth */
   auth: AuthScreen
   signedIn: boolean
+  loading: boolean
+  authBusy: boolean
+  authError: string | null
   showAuth: (screen: AuthScreen) => void
-  signIn: () => void
-  signOut: () => void
+  signIn: (email: string, password: string) => Promise<void>
+  signUp: (input: { name: string; handle: string; email: string; password: string; interests: Interest[] }) => Promise<void>
+  signOut: () => Promise<void>
+  updatePassword: (current: string, next: string) => Promise<boolean>
 
   /* navigation */
   view: View
@@ -125,6 +246,7 @@ interface StoreValue {
   toggleLike: (postId: string) => void
   toggleSave: (postId: string) => void
   toggleReaction: (postId: string, emoji: string) => void
+  loadPostComments: (postId: string) => void
   addComment: (postId: string, text: string) => void
   createPost: (input: { text: string; tags: string[]; theme?: Interest }) => void
   createStory: (caption: string) => void
@@ -133,6 +255,7 @@ interface StoreValue {
   toggleJoinGroup: (groupId: string) => void
   createGroup: (input: { name: string; description: string; category: Interest; privacy: Group['privacy'] }) => void
   sendMessage: (conversationId: string, text: string) => void
+  startConversationWith: (userId: string) => void
   markConversationRead: (conversationId: string) => void
   markAllNotificationsRead: () => void
   markNotificationRead: (id: string) => void
@@ -147,13 +270,17 @@ interface StoreValue {
 
 const StoreContext = createContext<StoreValue | null>(null)
 
-let nextId = 1000
-const uid = (prefix: string) => `${prefix}-${nextId++}`
-
 export function StoreProvider({ children }: { children: ReactNode }) {
   /* auth ------------------------------------------------------------------ */
-  const [signedIn, setSignedIn] = useState(true)
+  const [session, setSession] = useState<Session | null>(null)
+  const [profile, setProfile] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
   const [auth, setAuth] = useState<AuthScreen>(null)
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+
+  const signedIn = session !== null && profile !== null
+  const me = profile ?? EMPTY_USER
 
   /* navigation ------------------------------------------------------------ */
   const [stack, setStack] = useState<View[]>([{ name: 'home' }])
@@ -182,27 +309,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const openStory = useCallback((index: number) => setStoryIndex(index), [])
   const closeStory = useCallback(() => setStoryIndex(null), [])
 
-  /* data ------------------------------------------------------------------ */
-  const [users] = useState<User[]>(USERS)
-  const [posts, setPosts] = useState<Post[]>(POSTS)
-  const [stories, setStories] = useState<Story[]>(STORIES)
-  const [groups, setGroups] = useState<Group[]>(GROUPS)
-  const [conversations, setConversations] = useState<Conversation[]>(CONVERSATIONS)
-  const [notifications, setNotifications] = useState<AppNotification[]>(NOTIFICATIONS)
-  const [following, setFollowing] = useState<Set<string>>(new Set(['u-renata', 'u-bruna']))
-  const [activeConversationId, setActiveConversation] = useState<string | null>(CONVERSATIONS[0].id)
-  const [profile, setProfile] = useState(() => {
-    const me = usersById.get(ME_ID)!
-    return { name: me.name, bio: me.bio ?? '', city: me.city ?? '' }
-  })
-  const [email, setEmail] = useState('marcos.v@email.com')
+  /* data -------------------------------------------------------------------
+     Everything below is real Supabase data — see DATABASE.md for the schema,
+     RLS policies and RPCs this reads and writes. -------------------------- */
+  const [users, setUsers] = useState<User[]>([])
+  const [posts, setPosts] = useState<Post[]>([])
+  const [stories, setStories] = useState<Story[]>([])
+  const [groups, setGroups] = useState<Group[]>([])
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set())
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
 
-  const me = useMemo<User>(() => ({ ...usersById.get(ME_ID)!, ...profile }), [profile])
+  const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
+  const userOf = useCallback((id: string): User => usersById.get(id) ?? EMPTY_USER, [usersById])
 
-  const userOf = useCallback(
-    (id: string): User => (id === ME_ID ? me : (usersById.get(id) ?? me)),
-    [me],
-  )
+  /** interest name -> id, resolved once per session; used when creating a group. */
+  const interestIds = useRef<Map<string, string>>(new Map())
+  /** Conversations whose message history has already been fetched. */
+  const loadedConversations = useRef<Set<string>>(new Set())
 
   /* toasts ---------------------------------------------------------------- */
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -219,241 +344,634 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
 
-  /* actions --------------------------------------------------------------- */
-  const toggleLike = useCallback((postId: string) => {
-    setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId ? { ...p, liked: !p.liked, likes: p.likes + (p.liked ? -1 : 1) } : p,
-      ),
-    )
+  /* -------------------------------------------------------------------- */
+  /* Initial load + auth session lifecycle                                 */
+  /* -------------------------------------------------------------------- */
+
+  const resetLocalState = useCallback(() => {
+    setProfile(null)
+    setUsers([])
+    setPosts([])
+    setStories([])
+    setGroups([])
+    setConversations([])
+    setNotifications([])
+    setFollowingIds(new Set())
+    setActiveConversationId(null)
+    loadedConversations.current.clear()
+    setStack([{ name: 'home' }])
+    setSheet(null)
+    setStoryIndex(null)
   }, [])
 
-  const toggleSave = useCallback(
-    (postId: string) => {
-      setPosts((prev) => {
-        const next = prev.map((p) => (p.id === postId ? { ...p, saved: !p.saved } : p))
-        const target = next.find((p) => p.id === postId)
-        toast(target?.saved ? 'Post salvo' : 'Removido dos salvos')
-        return next
-      })
+  const loadAll = useCallback(
+    async (userId: string) => {
+      const [meRes, usersRes, postsRes, storiesRes, groupsRes, convRes, notifRes, interestsRes] = await Promise.all([
+        supabase.from('profiles_with_interests').select('*').eq('id', userId).single(),
+        supabase.from('profiles_with_interests').select('*'),
+        supabase.from('feed_posts').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('active_stories').select('*').order('created_at', { ascending: false }),
+        supabase.from('groups_with_membership').select('*').order('name'),
+        supabase.from('my_conversations').select('*').order('last_message_at', { ascending: false }),
+        supabase.from('my_notifications').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('interests').select('id, name'),
+      ])
+
+      if (meRes.error || !meRes.data) {
+        console.error('Falha ao carregar o perfil:', meRes.error)
+        toast('Não foi possível carregar sua conta. Tente entrar novamente.')
+        await supabase.auth.signOut()
+        return
+      }
+
+      setProfile(mapUser(meRes.data))
+
+      if (usersRes.data) {
+        const mapped = usersRes.data.map(mapUser)
+        setUsers(mapped)
+        setFollowingIds(new Set(usersRes.data.filter((r) => r.viewer_is_following).map((r) => r.id!)))
+      }
+      if (postsRes.data) setPosts(postsRes.data.map(mapPost))
+      if (storiesRes.data) setStories(storiesRes.data.map(mapStory))
+      if (groupsRes.data) setGroups(groupsRes.data.map(mapGroup))
+      if (convRes.data) setConversations(convRes.data.map(mapConversation))
+      if (notifRes.data) setNotifications(notifRes.data.map(mapNotification))
+      if (interestsRes.data) {
+        interestIds.current = new Map(interestsRes.data.map((i) => [i.name, i.id]))
+      }
+
+      for (const res of [usersRes, postsRes, storiesRes, groupsRes, convRes, notifRes]) {
+        if (res.error) console.error(res.error)
+      }
     },
     [toast],
   )
 
-  const toggleReaction = useCallback((postId: string, emoji: string) => {
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id !== postId) return p
-        const existing = p.reactions.find((r) => r.emoji === emoji)
-        if (!existing) return { ...p, reactions: [...p.reactions, { emoji, count: 1, mine: true }] }
-        return {
-          ...p,
-          reactions: p.reactions
-            .map((r) =>
-              r.emoji === emoji ? { ...r, mine: !r.mine, count: r.count + (r.mine ? -1 : 1) } : r,
-            )
-            .filter((r) => r.count > 0),
-        }
-      }),
-    )
+  useEffect(() => {
+    let active = true
+
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!active) return
+      setSession(data.session)
+      if (data.session) await loadAll(data.session.user.id)
+      if (active) setLoading(false)
+    })
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession)
+      if (event === 'SIGNED_IN' && newSession) {
+        loadAll(newSession.user.id)
+      }
+      if (event === 'SIGNED_OUT') {
+        resetLocalState()
+      }
+    })
+
+    return () => {
+      active = false
+      sub.subscription.unsubscribe()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /* -------------------------------------------------------------------- */
+  /* Auth actions                                                          */
+  /* -------------------------------------------------------------------- */
+
+  const showAuth = useCallback((screen: AuthScreen) => {
+    setAuthError(null)
+    setAuth(screen)
+  }, [])
+
+  const signIn = useCallback(async (emailInput: string, password: string) => {
+    setAuthBusy(true)
+    setAuthError(null)
+    const { error } = await supabase.auth.signInWithPassword({ email: emailInput.trim(), password })
+    setAuthBusy(false)
+    if (error) {
+      setAuthError(mapAuthError(error.message))
+      return
+    }
+    setAuth(null)
+  }, [])
+
+  const signUp = useCallback(
+    async (input: { name: string; handle: string; email: string; password: string; interests: Interest[] }) => {
+      setAuthBusy(true)
+      setAuthError(null)
+      const { data, error } = await supabase.auth.signUp({
+        email: input.email.trim(),
+        password: input.password,
+        options: {
+          data: {
+            name: input.name.trim(),
+            handle: input.handle.trim(),
+            interests: input.interests,
+          },
+        },
+      })
+      setAuthBusy(false)
+      if (error) {
+        setAuthError(mapAuthError(error.message))
+        return
+      }
+      if (data.session) {
+        setAuth(null)
+      } else {
+        toast(`Enviamos um link de confirmação para ${input.email}. Confirme para entrar.`)
+        setAuth('login')
+      }
+    },
+    [toast],
+  )
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut()
+    setAuth('login')
+  }, [])
+
+  const updatePassword = useCallback(
+    async (current: string, next: string) => {
+      if (!session?.user.email) return false
+      // GoTrue has no "verify current password" call — re-authenticating checks it.
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: session.user.email,
+        password: current,
+      })
+      if (reauthError) {
+        toast('Senha atual incorreta')
+        return false
+      }
+      const { error } = await supabase.auth.updateUser({ password: next })
+      if (error) {
+        toast(mapAuthError(error.message))
+        return false
+      }
+      toast('Senha atualizada')
+      return true
+    },
+    [session, toast],
+  )
+
+  /* -------------------------------------------------------------------- */
+  /* Post actions                                                          */
+  /* -------------------------------------------------------------------- */
+
+  const toggleLike = useCallback(
+    async (postId: string) => {
+      const before = posts.find((p) => p.id === postId)
+      if (!before) return
+      const optimistic = !before.liked
+      setPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, liked: optimistic, likes: p.likes + (optimistic ? 1 : -1) } : p)),
+      )
+      const { data, error } = await supabase.rpc('toggle_like', { p_post_id: postId })
+      if (error) {
+        setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, liked: before.liked, likes: before.likes } : p)))
+        toast('Não foi possível curtir agora')
+        return
+      }
+      if (data !== optimistic) {
+        setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, liked: data } : p)))
+      }
+    },
+    [posts, toast],
+  )
+
+  const toggleSave = useCallback(
+    async (postId: string) => {
+      const before = posts.find((p) => p.id === postId)
+      if (!before) return
+      const optimistic = !before.saved
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, saved: optimistic } : p)))
+      const { data, error } = await supabase.rpc('toggle_bookmark', { p_post_id: postId })
+      if (error) {
+        setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, saved: before.saved } : p)))
+        toast('Não foi possível salvar agora')
+        return
+      }
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, saved: data } : p)))
+      toast(data ? 'Post salvo' : 'Removido dos salvos')
+    },
+    [posts, toast],
+  )
+
+  const toggleReaction = useCallback(
+    async (postId: string, emoji: string) => {
+      const before = posts.find((p) => p.id === postId)
+      if (!before) return
+      const existing = before.reactions.find((r) => r.emoji === emoji)
+      const nextReactions = existing
+        ? existing.mine
+          ? before.reactions
+              .map((r) => (r.emoji === emoji ? { ...r, mine: false, count: r.count - 1 } : r))
+              .filter((r) => r.count > 0)
+          : before.reactions.map((r) => (r.emoji === emoji ? { ...r, mine: true, count: r.count + 1 } : r))
+        : [...before.reactions, { emoji, count: 1, mine: true }]
+
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, reactions: nextReactions } : p)))
+      const { error } = await supabase.rpc('toggle_reaction', { p_post_id: postId, p_emoji: emoji })
+      if (error) {
+        setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, reactions: before.reactions } : p)))
+        toast('Não foi possível reagir agora')
+      }
+    },
+    [posts, toast],
+  )
+
+  const loadPostComments = useCallback(
+    async (postId: string) => {
+      const { data, error } = await supabase
+        .from('comments')
+        .select('id, author_id, body, created_at')
+        .eq('post_id', postId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: true })
+      if (error) {
+        toast('Não foi possível carregar os comentários')
+        return
+      }
+      const comments = (data ?? []).map(mapComment)
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, comments } : p)))
+    },
+    [toast],
+  )
+
   const addComment = useCallback(
-    (postId: string, text: string) => {
+    async (postId: string, text: string) => {
       const clean = text.trim()
-      if (!clean) return
+      if (!clean || !session) return
+      const { data, error } = await supabase
+        .from('comments')
+        .insert({ post_id: postId, author_id: session.user.id, body: clean })
+        .select('id, author_id, body, created_at')
+        .single()
+      if (error || !data) {
+        toast('Não foi possível comentar agora')
+        return
+      }
+      const comment = mapComment(data)
       setPosts((prev) =>
         prev.map((p) =>
-          p.id === postId
-            ? {
-                ...p,
-                comments: [...p.comments, { id: uid('c'), authorId: ME_ID, text: clean, createdAt: 'agora' }],
-              }
-            : p,
+          p.id === postId ? { ...p, commentsCount: p.commentsCount + 1, comments: [...p.comments, comment] } : p,
         ),
       )
       toast('Comentário publicado')
     },
-    [toast],
+    [session, toast],
   )
 
-  const createPost = useCallback<StoreValue['createPost']>(
-    ({ text, tags, theme }) => {
-      const themeMap: Record<Interest, Parameters<typeof photo>[0]> = {
-        Corrida: 'run',
-        Ciclismo: 'bike',
-        Nutrição: 'food',
-        Treino: 'gym',
-        Yoga: 'yoga',
+  const createPost = useCallback(
+    async ({ text, tags, theme }: { text: string; tags: string[]; theme?: Interest }) => {
+      if (!session) return
+      const image = photo(theme ? THEME_TO_PHOTO[theme] : 'nature', Math.floor(Math.random() * 3))
+      const { data: postId, error } = await supabase.rpc('create_post', {
+        p_body: text.trim(),
+        p_tags: tags,
+        p_media_urls: [image],
+        p_audience: 'PUBLIC',
+      })
+      if (error || !postId) {
+        toast('Não foi possível publicar agora')
+        return
       }
-      const post: Post = {
-        id: uid('p'),
-        authorId: ME_ID,
+      const newPost: Post = {
+        id: postId,
+        authorId: session.user.id,
         text: text.trim(),
         tags,
-        image: photo(theme ? themeMap[theme] : 'nature', Math.floor(Math.random() * 3)),
+        image,
         createdAt: 'agora',
         likes: 0,
         liked: false,
         saved: false,
+        commentsCount: 0,
         reactions: [],
         comments: [],
       }
-      setPosts((prev) => [post, ...prev])
+      setPosts((prev) => [newPost, ...prev])
       toast('Publicação criada')
     },
-    [toast],
+    [session, toast],
   )
 
   const createStory = useCallback(
-    (caption: string) => {
-      const story: Story = {
-        id: uid('s'),
-        authorId: ME_ID,
-        image: photo('nature', Math.floor(Math.random() * 3), 700),
-        caption: caption.trim() || 'Meu dia hoje',
-        seen: false,
+    async (caption: string) => {
+      if (!session) return
+      const clean = caption.trim() || 'Meu dia hoje'
+      const image = photo('nature', Math.floor(Math.random() * 3), 700)
+      const { data: storyId, error } = await supabase.rpc('create_story', {
+        p_caption: clean,
+        p_media_url: image,
+      })
+      if (error || !storyId) {
+        toast('Não foi possível publicar o story')
+        return
       }
-      setStories((prev) => [story, ...prev])
+      const newStory: Story = { id: storyId, authorId: session.user.id, image, caption: clean, seen: true }
+      setStories((prev) => [newStory, ...prev])
       toast('Story publicado — some em 24 h')
     },
-    [toast],
+    [session, toast],
   )
+
+  /* Persist "seen" the moment a story is opened. */
+  useEffect(() => {
+    if (storyIndex === null || !session) return
+    const story = stories[storyIndex]
+    if (!story || story.seen) return
+    setStories((prev) => prev.map((s) => (s.id === story.id ? { ...s, seen: true } : s)))
+    supabase
+      .from('story_views')
+      .insert({ story_id: story.id, viewer_id: session.user.id })
+      .then(({ error }) => {
+        if (error) console.error(error)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyIndex])
+
+  /* -------------------------------------------------------------------- */
+  /* Social graph                                                          */
+  /* -------------------------------------------------------------------- */
+
+  const isFollowing = useCallback((userId: string) => followingIds.has(userId), [followingIds])
 
   const toggleFollow = useCallback(
-    (userId: string) => {
-      setFollowing((prev) => {
+    async (userId: string) => {
+      const wasFollowing = followingIds.has(userId)
+      setFollowingIds((prev) => {
         const next = new Set(prev)
-        if (next.has(userId)) {
-          next.delete(userId)
-          toast(`Deixou de seguir ${usersById.get(userId)?.name ?? ''}`)
-        } else {
-          next.add(userId)
-          toast(`Seguindo ${usersById.get(userId)?.name ?? ''}`)
-        }
+        wasFollowing ? next.delete(userId) : next.add(userId)
         return next
       })
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, followers: u.followers + (wasFollowing ? -1 : 1) } : u)))
+      setProfile((prev) => (prev ? { ...prev, following: prev.following + (wasFollowing ? -1 : 1) } : prev))
+
+      const { data, error } = await supabase.rpc('toggle_follow', { p_target: userId })
+      if (error) {
+        setFollowingIds((prev) => {
+          const next = new Set(prev)
+          wasFollowing ? next.add(userId) : next.delete(userId)
+          return next
+        })
+        setUsers((prev) =>
+          prev.map((u) => (u.id === userId ? { ...u, followers: u.followers + (wasFollowing ? 1 : -1) } : u)),
+        )
+        setProfile((prev) => (prev ? { ...prev, following: prev.following + (wasFollowing ? 1 : -1) } : prev))
+        toast('Não foi possível atualizar agora')
+        return
+      }
+      const name = usersById.get(userId)?.name ?? ''
+      toast(data ? `Seguindo ${name}` : `Deixou de seguir ${name}`)
     },
-    [toast],
+    [followingIds, usersById, toast],
   )
 
-  const isFollowing = useCallback((userId: string) => following.has(userId), [following])
+  /* -------------------------------------------------------------------- */
+  /* Groups                                                                */
+  /* -------------------------------------------------------------------- */
 
   const toggleJoinGroup = useCallback(
-    (groupId: string) => {
+    async (groupId: string) => {
+      const group = groups.find((g) => g.id === groupId)
+      if (!group) return
+      const { data: nextStatus, error } = await supabase.rpc('toggle_group_membership', { p_group_id: groupId })
+      if (error) {
+        toast('Não foi possível atualizar sua participação')
+        return
+      }
       setGroups((prev) =>
         prev.map((g) => {
           if (g.id !== groupId) return g
-          const joined = !g.joined
-          toast(joined ? `Você entrou em ${g.name}` : `Você saiu de ${g.name}`)
-          return { ...g, joined, members: g.members + (joined ? 1 : -1) }
+          const wasActive = g.joined
+          const joined = nextStatus === 'ACTIVE'
+          const pending = nextStatus === 'PENDING'
+          const delta = joined && !wasActive ? 1 : !joined && !pending && wasActive ? -1 : 0
+          return { ...g, joined, pending, members: g.members + delta }
         }),
       )
+      if (nextStatus === 'ACTIVE') toast(`Você entrou em ${group.name}`)
+      else if (nextStatus === 'PENDING') toast(`Pedido enviado para ${group.name}`)
+      else toast(`Você saiu de ${group.name}`)
     },
-    [toast],
+    [groups, toast],
   )
 
-  const createGroup = useCallback<StoreValue['createGroup']>(
-    ({ name, description, category, privacy }) => {
-      const themeMap: Record<Interest, Parameters<typeof photo>[0]> = {
-        Corrida: 'run',
-        Ciclismo: 'bike',
-        Nutrição: 'food',
-        Treino: 'gym',
-        Yoga: 'yoga',
+  const createGroup = useCallback(
+    async ({
+      name,
+      description,
+      category,
+      privacy,
+    }: {
+      name: string
+      description: string
+      category: Interest
+      privacy: Group['privacy']
+    }) => {
+      if (!session) return
+      const cover = photo(THEME_TO_PHOTO[category], Math.floor(Math.random() * 3), 700)
+      const cleanDescription = description.trim() || 'Um grupo novinho, bora chamar gente.'
+      const { data, error } = await supabase
+        .from('groups')
+        .insert({
+          name: name.trim(),
+          description: cleanDescription,
+          cover_url: cover,
+          privacy: privacy === 'Privado' ? 'PRIVATE' : 'PUBLIC',
+          created_by: session.user.id,
+        })
+        .select('id, name, cover_url, description')
+        .single()
+
+      if (error || !data) {
+        toast('Não foi possível criar o grupo')
+        return
       }
-      const group: Group = {
-        id: uid('g'),
-        name: name.trim(),
-        description: description.trim() || 'Um grupo novinho, bora chamar gente.',
-        cover: photo(themeMap[category], Math.floor(Math.random() * 3), 700),
+
+      const interestId = interestIds.current.get(category)
+      if (interestId) {
+        const { error: interestErr } = await supabase
+          .from('group_interests')
+          .insert({ group_id: data.id, interest_id: interestId })
+        if (interestErr) console.error(interestErr)
+      }
+
+      const newGroup: Group = {
+        id: data.id,
+        name: data.name,
+        cover: data.cover_url ?? cover,
         members: 1,
         topics: 0,
         privacy,
         joined: true,
         category,
+        description: data.description ?? cleanDescription,
       }
-      setGroups((prev) => [group, ...prev])
-      toast(`Grupo “${group.name}” criado`)
+      setGroups((prev) => [newGroup, ...prev])
+      toast(`Grupo "${newGroup.name}" criado`)
     },
-    [toast],
+    [session, toast],
   )
 
-  const sendMessage = useCallback((conversationId: string, text: string) => {
-    const clean = text.trim()
-    if (!clean) return
-    const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              preview: `Você: ${clean}`,
-              time,
-              unread: 0,
-              messages: [...c.messages, { id: uid('m'), fromMe: true, text: clean, time }],
-            }
-          : c,
-      ),
-    )
-  }, [])
+  /* -------------------------------------------------------------------- */
+  /* Messages                                                              */
+  /* -------------------------------------------------------------------- */
 
-  const markConversationRead = useCallback((conversationId: string) => {
+  const loadMessages = useCallback(
+    async (conversationId: string) => {
+      if (!session) return
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, sender_id, body, sent_at')
+        .eq('conversation_id', conversationId)
+        .is('deleted_at', null)
+        .order('sent_at', { ascending: true })
+      if (error) {
+        toast('Não foi possível carregar as mensagens')
+        return
+      }
+      const messages: Message[] = (data ?? []).map((m) => ({
+        id: m.id,
+        fromMe: m.sender_id === session.user.id,
+        text: m.body,
+        time: clockTime(m.sent_at),
+      }))
+      setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, messages } : c)))
+    },
+    [session, toast],
+  )
+
+  const setActiveConversation = useCallback(
+    (id: string | null) => {
+      setActiveConversationId(id)
+      if (id && !loadedConversations.current.has(id)) {
+        loadedConversations.current.add(id)
+        loadMessages(id)
+      }
+    },
+    [loadMessages],
+  )
+
+  const sendMessage = useCallback(
+    async (conversationId: string, text: string) => {
+      const clean = text.trim()
+      if (!clean || !session) return
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({ conversation_id: conversationId, sender_id: session.user.id, body: clean })
+        .select('id, sender_id, body, sent_at')
+        .single()
+      if (error || !data) {
+        toast('Não foi possível enviar a mensagem')
+        return
+      }
+      const time = clockTime(data.sent_at)
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                preview: `Você: ${clean}`,
+                time,
+                unread: 0,
+                messages: [...c.messages, { id: data.id, fromMe: true, text: data.body, time }],
+              }
+            : c,
+        ),
+      )
+    },
+    [session, toast],
+  )
+
+  const startConversationWith = useCallback(
+    async (userId: string) => {
+      const existing = conversations.find((c) => c.userId === userId)
+      if (existing) {
+        setActiveConversation(existing.id)
+        go('mensagens')
+        return
+      }
+      const { data: conversationId, error } = await supabase.rpc('get_or_create_direct_conversation', {
+        p_other_user: userId,
+      })
+      if (error || !conversationId) {
+        toast('Não foi possível abrir a conversa')
+        return
+      }
+      loadedConversations.current.add(conversationId)
+      setConversations((prev) => [
+        { id: conversationId, userId, preview: 'Diga oi 👋', time: '', unread: 0, messages: [] },
+        ...prev,
+      ])
+      setActiveConversationId(conversationId)
+      go('mensagens')
+    },
+    [conversations, go, setActiveConversation, toast],
+  )
+
+  const markConversationRead = useCallback(async (conversationId: string) => {
     setConversations((prev) => prev.map((c) => (c.id === conversationId ? { ...c, unread: 0 } : c)))
+    const { error } = await supabase.rpc('mark_conversation_read', { p_conversation_id: conversationId })
+    if (error) console.error(error)
   }, [])
 
-  const markAllNotificationsRead = useCallback(() => {
+  /* -------------------------------------------------------------------- */
+  /* Notifications                                                         */
+  /* -------------------------------------------------------------------- */
+
+  const markAllNotificationsRead = useCallback(async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
-    toast('Notificações marcadas como lidas')
+    const { error } = await supabase.rpc('mark_all_notifications_read')
+    if (error) toast('Não foi possível atualizar as notificações')
+    else toast('Notificações marcadas como lidas')
   }, [toast])
 
-  const markNotificationRead = useCallback((id: string) => {
+  const markNotificationRead = useCallback(async (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)))
+    const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id)
+    if (error) console.error(error)
   }, [])
 
-  const updateProfile = useCallback<StoreValue['updateProfile']>(
-    (input) => {
-      setProfile(input)
+  /* -------------------------------------------------------------------- */
+  /* Account                                                               */
+  /* -------------------------------------------------------------------- */
+
+  const updateProfile = useCallback(
+    async ({ name, bio, city }: { name: string; bio: string; city: string }) => {
+      if (!session) return
+      const { error } = await supabase
+        .from('profiles')
+        .update({ name, bio: bio || null, location: city || null })
+        .eq('id', session.user.id)
+      if (error) {
+        toast('Não foi possível salvar o perfil')
+        return
+      }
+      setProfile((prev) => (prev ? { ...prev, name, bio, city } : prev))
+      setUsers((prev) => prev.map((u) => (u.id === session.user.id ? { ...u, name, bio, city } : u)))
       toast('Perfil atualizado')
     },
-    [toast],
+    [session, toast],
   )
 
   const updateEmail = useCallback(
-    (value: string) => {
-      setEmail(value)
-      toast('E-mail atualizado')
+    async (newEmail: string) => {
+      const { error } = await supabase.auth.updateUser({ email: newEmail })
+      if (error) {
+        toast(mapAuthError(error.message))
+        return
+      }
+      toast('Enviamos um link de confirmação para o novo e-mail')
     },
     [toast],
   )
 
-  const showAuth = useCallback((screen: AuthScreen) => setAuth(screen), [])
-
-  const signIn = useCallback(() => {
-    setSignedIn(true)
-    setAuth(null)
-    setStack([{ name: 'home' }])
-    toast(`Bom dia, ${profile.name.split(' ')[0]}!`)
-  }, [profile.name, toast])
-
-  const signOut = useCallback(() => {
-    setSignedIn(false)
-    setAuth('login')
-    setSheet(null)
-    setStack([{ name: 'home' }])
-  }, [])
+  const email = session?.user.email ?? ''
 
   /* derived --------------------------------------------------------------- */
   const unreadNotifications = notifications.filter((n) => !n.read).length
   const unreadMessages = conversations.reduce((sum, c) => sum + c.unread, 0)
-
-  /* Mark stories seen as they are opened. */
-  useEffect(() => {
-    if (storyIndex === null) return
-    const id = stories[storyIndex]?.id
-    if (!id) return
-    setStories((prev) => prev.map((s) => (s.id === id ? { ...s, seen: true } : s)))
-  }, [storyIndex, stories])
 
   /* Body scroll lock while any overlay is open. */
   const overlayOpen = sheet !== null || storyIndex !== null
@@ -481,9 +999,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value: StoreValue = {
     auth,
     signedIn,
+    loading,
+    authBusy,
+    authError,
     showAuth,
     signIn,
+    signUp,
     signOut,
+    updatePassword,
     view,
     canGoBack: stack.length > 1,
     go,
@@ -509,6 +1032,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     toggleLike,
     toggleSave,
     toggleReaction,
+    loadPostComments,
     addComment,
     createPost,
     createStory,
@@ -517,6 +1041,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     toggleJoinGroup,
     createGroup,
     sendMessage,
+    startConversationWith,
     markConversationRead,
     markAllNotificationsRead,
     markNotificationRead,

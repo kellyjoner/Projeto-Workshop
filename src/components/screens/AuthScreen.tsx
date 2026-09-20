@@ -19,7 +19,7 @@ function strength(pw: string): { label: string; tone: string; pct: number } {
 
 /** Split hero + form, as in the `gooday_cadastro_desktop` export. Login reuses it. */
 export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
-  const { signIn, showAuth } = useStore()
+  const { signIn, signUp, showAuth, authBusy, authError } = useStore()
   const isSignup = mode === 'cadastro'
 
   const [name, setName] = useState('')
@@ -34,18 +34,22 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
 
   const errors = {
     name: isSignup && name.trim().length < 3 ? 'Informe seu nome completo.' : '',
-    handle: isSignup && handle.trim().length < 3 ? 'Escolha um nome de usuário.' : '',
+    handle: isSignup && handle.trim().length < 3 ? 'Escolha um nome de usuário com pelo menos 3 caracteres.' : '',
     email: !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim()) ? 'E-mail inválido.' : '',
     password: password.length < 8 ? 'Mínimo de 8 caracteres.' : '',
     terms: isSignup && !terms ? 'Você precisa aceitar os termos.' : '',
   }
   const invalid = Object.values(errors).some(Boolean)
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setTouched(true)
-    if (invalid) return
-    signIn()
+    if (invalid || authBusy) return
+    if (isSignup) {
+      await signUp({ name: name.trim(), handle: handle.trim(), email: email.trim(), password, interests })
+    } else {
+      await signIn(email.trim(), password)
+    }
   }
 
   const toggleInterest = (i: Interest) =>
@@ -98,6 +102,12 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
           </p>
 
           <div className="mt-6 flex flex-col gap-4">
+            {authError && (
+              <div className="rounded-2xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
+                {authError}
+              </div>
+            )}
+
             {isSignup && (
               <>
                 <Field label="Nome completo" error={touched ? errors.name : undefined}>
@@ -116,7 +126,9 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
                     </span>
                     <Input
                       value={handle}
-                      onChange={(e) => setHandle(e.target.value.replace(/\s/g, '').toLowerCase())}
+                      onChange={(e) =>
+                        setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+                      }
                       className="pl-8"
                       placeholder="marcos_v"
                     />
@@ -199,8 +211,14 @@ export function AuthScreen({ mode }: { mode: 'login' | 'cadastro' }) {
               </>
             )}
 
-            <Button type="submit" full disabled={touched && invalid}>
-              {isSignup ? 'Cadastrar no Gooday' : 'Entrar'}
+            <Button type="submit" full disabled={(touched && invalid) || authBusy}>
+              {authBusy
+                ? isSignup
+                  ? 'Criando conta…'
+                  : 'Entrando…'
+                : isSignup
+                  ? 'Cadastrar no Gooday'
+                  : 'Entrar'}
             </Button>
 
             <p className="text-center text-sm text-ink-500">
